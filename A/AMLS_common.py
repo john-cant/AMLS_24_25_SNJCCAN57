@@ -10,10 +10,12 @@
 ## 02122024 Update graph function to allow plot start at skip to ease analysis
 ## 07122024 Updated for more stable use of medmnist library and associated functions
 ## 09122024 Enhanced dataclass with defaults and list function for saving to file
-## 09122024 Add tqdm custom callback 
-## 15122024 Extended HyperParameter 
+## 09122024 Add tqdm custom callback
+## 15122024 Extended HyperParameter
 ## 16122024 Again extended HyperParameter e.g. layers, dropout, filter2
 ## 16122024 Integrated extended analysis code from Hyper script into library to faciitate sharing
+## 20122024 Extended parameter again
+## 27122024 Comments and modifications for Task B1 CNN Tune
 
 import datetime
 from dataclasses import dataclass, fields
@@ -25,8 +27,7 @@ from tqdm import tqdm
 import tensorflow as tf
 ## MedMNIST specific libraries loading all relevant items (updated 07122024)
 import medmnist
-from medmnist import INFO
-#from medmnist.dataset import BreastMNIST, BloodMNIST
+from medmnist import INFO ##, info
 ## sklearn to allow analysis of hyperparameter choices
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
@@ -37,18 +38,21 @@ from sklearn.ensemble import RandomForestRegressor
 class HyperParameters:
     """ data class to allow storage and passing of hyperparameters as structure
     """
-    learning_rate:float
+    learning_rate: float
     batch_size: int
     num_epochs: int
     optimise: str
     loss: str
-    filter: int
-    filter2: int = 16
+    num_filter: int
+    strides: int = 1
+    padding: str = "valid"
     dropout_rate: float = 0.2
     layers: int = 3
     default_activation: str = "relu"
 
     def list_parameters(self):
+        """ lists all attributes and values in HyperParameters class
+        """
         result = ""
         # Loop through attributes and get their values
         for field in fields(HyperParameters):
@@ -56,35 +60,43 @@ class HyperParameters:
             value = getattr(self, attribute_name)
             result= result+(f"{attribute_name}: {value}"+"\n")
         return result
-    
+
 @dataclass
 class RunResult:
     """ data class to allow storage and passing of summary run results as structure
     """
-    min_loss:float
-    max_acc:float
-    last_loss:float
-    last_acc:float
-    var_loss:float
-    var_acc:float
-    
+    min_loss: float
+    max_acc: float
+    last_loss: float
+    last_acc: float
+    var_loss: float
+    var_acc: float
+
 class TqdmEpochProgress(tf.keras.callbacks.Callback):
+    """ simple progress bar
+    """
     def __init__(self, total_epochs):
         super().__init__()
         self.total_epochs = total_epochs
         self.progress_bar = None
 
     def on_train_begin(self, logs=None):
+        """ set up for start of training run
+        """
         self.progress_bar = tqdm(total=self.total_epochs, desc="Epoch Progress", unit="epoch")
 
-    def on_epoch_end(self, epoch, logs=None):
+    def on_epoch_end(self, _, logs=None):
+        """ update after each epoch
+        """
         self.progress_bar.update(1)
         self.progress_bar.set_postfix(logs)
 
     def on_train_end(self, logs=None):
+        """ close out at end of training run
+        """
         self.progress_bar.close()
 
-def medMNIST_load(data_name,batch_size):
+def medMNIST_load(data_name,batch_size,shuffle="N"):
     """ reads in data_name and batch_size and returns set of tensor flow datasets
     """
     ## first set up key variables
@@ -96,12 +108,12 @@ def medMNIST_load(data_name,batch_size):
     else:
         ## Load raw training, test and validation datasets
         ## Make explicit references to one of the two supported sets
-        ## updated for more consistent use of DataClass
+        ## updated for more consistent use of data_class
         info          = INFO[data_name]     # info about this dataset
-        DataClass     = getattr(medmnist, info['python_class'])
-        train_dataset = DataClass(split='train', download=download)
-        test_dataset  = DataClass(split='test', download=download)
-        val_dataset   = DataClass(split='val', download=download)
+        data_class    = getattr(medmnist, info['python_class'])
+        train_dataset = data_class(split='train', download=download)
+        test_dataset  = data_class(split='test', download=download)
+        val_dataset   = data_class(split='val', download=download)
         ## Now access data and labels from loaded datasets
         train_data    = train_dataset.imgs
         train_labels  = train_dataset.labels
@@ -122,10 +134,14 @@ def medMNIST_load(data_name,batch_size):
             test_data     = np.expand_dims(test_data, axis=-1)   # Add channel dimension
             val_data      = np.expand_dims(val_data, axis=-1)    # Add channel dimension
         ## Create TensorFlow Datasets and bundle to return as single result set
-        ## train dataset is explicitly shuffled
-        train_dataset = tf.data.Dataset.from_tensor_slices((train_data, train_labels))\
-                                                            .shuffle(len(train_data))\
-                                                            .batch(batch_size)
+        ## if shuffle equals Y then train dataset is explicitly shuffled
+        if shuffle == "Y":
+            train_dataset = tf.data.Dataset.from_tensor_slices((train_data, train_labels))\
+                                                                .shuffle(len(train_data))\
+                                                                .batch(batch_size)
+        else:
+            train_dataset = tf.data.Dataset.from_tensor_slices((train_data, train_labels))\
+                                                                .batch(batch_size)
         test_dataset  = tf.data.Dataset.from_tensor_slices((test_data, test_labels))\
                                                             .batch(batch_size)
         val_dataset   = tf.data.Dataset.from_tensor_slices((val_data, val_labels))\
@@ -168,6 +184,8 @@ def graph_and_save(history,summary,parameter,filebase,skip=0):
        history is full history of metrics for all epochs
        summary is model summary
        parameter is hyperparameter store
+       skip allows later start point for graphs (default is 0).
+       all data goes to files whatever
     """
     graph(history,summary,parameter,skip)
     ## dump history metrics to excel and model and hyper parameters summary
@@ -184,11 +202,10 @@ def graph(history,summary,parameter,skip=0):
        history is full history of metrics for all epochs
        summary is model summary (not used, but passed for consistency)
        parameter is hyperparameter store
-       skip allows later start point for graphs (default is 0). 
-       All data goes to files whatever
+       skip allows later start point for graphs (default is 0).
     """
-    ## first load the keys supplied as part of history. These are then used to 
-    ## dynamically set various graph elements
+    ## first load the keys supplied as part of history.
+    ## used to dynamically set various graph elements
     keys = list(history.history.keys())
     ## work out if there is a single or double graph lines
     graph_type = "two"
@@ -227,6 +244,7 @@ def graph(history,summary,parameter,skip=0):
     else:
         plt.legend(['train'], loc='upper right')
     plt.show()
+    print("for model\n",str(summary))
 
 def history_to_excel(history,summary,parameter,filebase):
     """ puts history metrics into unique excel file
@@ -234,6 +252,7 @@ def history_to_excel(history,summary,parameter,filebase):
         further version could take all of the paramter entries and autoadd to file
     """
     keys = list(history.history.keys())
+    print("history_to excel keys",keys)
     ## check to see whether val_ variants are provided
     column_order = []
     column_order.append('epoch')
@@ -253,50 +272,65 @@ def history_to_excel(history,summary,parameter,filebase):
     ## write the parameter text to the file
     with open(filename_s, "w") as file:
         file.write(parameter.list_parameters()+summary)
-    run_result = RunResult(min_loss  = metrics_df[column_order[1]].min(),
-                           max_acc   = metrics_df[column_order[2]].max(),
-                           last_loss = metrics_df[column_order[1]].iloc[-1],
-                           last_acc  = metrics_df[column_order[2]].iloc[-1],
-                           var_loss  = metrics_df[column_order[1]].var(),
-                           var_acc  = metrics_df[column_order[2]].var())
-                           ## ** added parameter to return results
+    run_result = RunResult(min_loss      = metrics_df[column_order[1]].min(),
+                           max_acc       = metrics_df[column_order[2]].max(),
+                           last_loss     = metrics_df[column_order[1]].iloc[-1],
+                           last_acc      = metrics_df[column_order[2]].iloc[-1],
+                           ##max_val_loss  = metrics_df[column_order[3]].min(),
+                           ##max_val_acc   = metrics_df[column_order[4]].max(),
+                           ##last_val_loss = metrics_df[column_order[3]].iloc[-1],
+                           ##last_val_acc  = metrics_df[column_order[4]].iloc[-1],
+                           var_loss      = metrics_df[column_order[1]].var(),
+                           var_acc       = metrics_df[column_order[2]].var())
+    ## added parameter to return results
     return [filename_h,filename_s,run_result,parameter] #filenames
 
-def hyper_process(history,summary,parameter):
+def hyper_process(history,_,parameter):
     """ expanded list of parameters that are handled
         further version could take all of the paramter entries and autoadd to file
     """
     keys = list(history.history.keys())
+    print(keys)
     ## check to see whether val_ variants are provided
     column_order = []
     column_order.append('epoch')
     for item in keys:
         column_order.append(item)
+    ##column_order.append('val_loss')
+    ##column_order.append('val_acc')    
     ## convert history which is dictionary structure to a DataFrame
     metrics_df = pd.DataFrame(history.history)
     ## add an epoch column to the dataframe for ease of access
     metrics_df['epoch'] = metrics_df.index + 1
     metrics_df = metrics_df[column_order]
-    ## write dataframe to filename formed by appending timestr to filenamebase
-    timestr    = get_timestamp()
-    run_result = RunResult(min_loss  = metrics_df[column_order[1]].min(),
-                           max_acc   = metrics_df[column_order[2]].max(),
-                           last_loss = metrics_df[column_order[1]].iloc[-1],
-                           last_acc  = metrics_df[column_order[2]].iloc[-1],
-                           var_loss  = metrics_df[column_order[1]].var(),
-                           var_acc  = metrics_df[column_order[2]].var())
-                           ## ** added parameter to return results
+    ## do I need write dataframe to filename
+    ##timestr    = get_timestamp()
+    ##filename_h = filebase+'metrics_df_'+timestr+'.xlsx'
+    ## metrics_df.to_excel(filename_h,index=False)
+    run_result = RunResult(min_loss      = metrics_df[column_order[1]].min(),
+                           max_acc       = metrics_df[column_order[2]].max(),
+                           last_loss     = metrics_df[column_order[1]].iloc[-1],
+                           last_acc      = metrics_df[column_order[2]].iloc[-1],
+                           ##max_val_loss  = metrics_df[column_order[3]].min(),
+                           ##max_val_acc   = metrics_df[column_order[4]].max(),
+                           ##last_val_loss = metrics_df[column_order[3]].iloc[-1],
+                           ##last_val_acc  = metrics_df[column_order[4]].iloc[-1],
+                           var_loss      = metrics_df[column_order[1]].var(),
+                           var_acc       = metrics_df[column_order[2]].var())
+    ## added parameter to return results
     hyper_history = ["","",run_result,parameter]
     return hyper_history
 
-def analyse_run(run_list):
+def analyse_run(run_list,selection,filebase):
     """ take run results and analyse
+        added filebase param to allow saving of data to file 27122024
     """
+    print("extracting")
     # Extract data into a flat structure
     flat_data = []
     for entry in run_list:
         ## need to flatten structure for both runresult and parameter
-        metrics_file, summary_file, result,parameter = entry 
+        metrics_file, summary_file, result,parameter = entry
         flat_data.append({
             'metrics_file': metrics_file,
             'summary_file': summary_file,
@@ -311,8 +345,9 @@ def analyse_run(run_list):
             'learning_rate': parameter.learning_rate,
             'batch_size': parameter.batch_size,
             'num_epochs': parameter.num_epochs,
-            'filter': parameter.filter,
-            'filter2': parameter.filter2,
+            'num_filter': parameter.num_filter,
+            'strides': parameter.strides,
+            'padding':parameter.padding,
             'dropout_rate': parameter.dropout_rate,
             'layers': parameter.layers,
             'optimise': parameter.optimise,
@@ -321,29 +356,38 @@ def analyse_run(run_list):
         })
     # Convert to DataFrame
     run_df = pd.DataFrame(flat_data)
-    ## add save to excel?
-    # Select the run with the smallest min_loss
+    ## added save to excel 27122024
+    timestr    = get_timestamp() #' may pass this in as param to match other filenames
+    filename_r = filebase+'run_'+timestr+'.xlsx'
+    run_df.to_excel(filename_r,index=False)
+    ## Select the run with the smallest min_loss
     min_loss_run = run_df.loc[run_df['min_loss'].idxmin()]
-    # Select the run with the largest max_acc
+    ## Select the run with the largest max_acc
     max_acc_run = run_df.loc[run_df['max_acc'].idxmax()]
-    # Select the run that satisfies both criteria
-    best_run = run_df.loc[(run_df['min_loss'] == run_df['min_loss'].min()) & 
+
+    ## Select the runs that satisfies the selected criteria
+    best_run = run_df.loc[(run_df['min_loss'] == run_df['min_loss'].min()) &
                     (run_df['max_acc'] == run_df['max_acc'].max())]
     if len(best_run) == 0:
-        print("No single run matches both objectives so individually")
+        print("No single run matches both objectives, so individually")
         print("Run with the smallest min_loss:")
         print(min_loss_run)
         print("\nRun with the largest max_acc:")
         print(max_acc_run)
+    ## Select the runs that satisfies the selected criteria
+    best_run2 = run_df.loc[(run_df['min_loss'] == run_df['min_loss'].min()) &
+                    (run_df['max_acc'] == run_df['max_acc'].max()) &
+                    (run_df['max_acc'] >= run_df['last_acc'])]
 
-    return best_run,run_df
+    return best_run,run_df,best_run2
 
 def analyse_hyperparameters(run_df):
     """ analyse hyperparameters
     """
     ## Prepare the input analysis data with hyperparameters as features
-    ## doesnt support loss or optimise as they are not numeric values
-    X = run_df[['learning_rate', 'num_epochs', 'filter','filter2','layers','dropout_rate','batch_size']]  # Hyperparameters
+    ## doesnt support loss or optimise as they are not numeric values (yet)
+    X = run_df[['learning_rate', 'num_epochs', 'num_filter','strides','layers',\
+                'dropout_rate','batch_size']]  # Hyperparameters
     y = run_df['max_acc']  ## Metric to predict should this be accuracy or loss?
     ## Train-test split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -354,12 +398,12 @@ def analyse_hyperparameters(run_df):
     y_pred = model.predict(X_test)
     print("R^2 Score:", r2_score(y_test, y_pred))
     print("Mean Squared Error:", mean_squared_error(y_test, y_pred))
-    ## Coefficients to understand impact
+    ## calculate coefficients for each to understand impact
     coef = pd.DataFrame({'Hyperparameter': X.columns, 'Coefficient': model.coef_})
     ## Fit Random Forest Regressor for max_acc
     rf_model = RandomForestRegressor(random_state=42)
     rf_model.fit(X, run_df['max_acc'])
-    ## Feature importance
+    ## calculate feature importance
     feature_importance = pd.DataFrame({
         'Hyperparameter': X.columns,
         'Importance': rf_model.feature_importances_
