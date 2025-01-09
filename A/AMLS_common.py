@@ -16,14 +16,17 @@
 ## 16122024 Integrated extended analysis code from Hyper script into library to faciitate sharing
 ## 20122024 Extended parameter again
 ## 27122024 Comments and modifications for Task B1 CNN Tune
+## 31122024 Extended dataclasses and enhanced hyper analysis in combination with model scripts
 
+#################################################### LIBRARY IMPORTS ##############################
+## standard python libraries
 import datetime
 from dataclasses import dataclass, fields
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-## import tensorflow
+## set up tensorflow
 import tensorflow as tf
 ## MedMNIST specific libraries loading all relevant items (updated 07122024)
 import medmnist
@@ -34,12 +37,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.ensemble import RandomForestRegressor
 
+#################################################### SET UP DATACLASSES ##############################
 @dataclass
 class HyperParameters:
-    """ data class to allow storage and passing of hyperparameters as structure
+    """ data class to allow storage and passing set of hyperparameters as structure
     """
     learning_rate: float
-    batch_size: int
+    kernel_size: int
     num_epochs: int
     optimise: str
     loss: str
@@ -60,6 +64,33 @@ class HyperParameters:
             value = getattr(self, attribute_name)
             result= result+(f"{attribute_name}: {value}"+"\n")
         return result
+    
+    @classmethod
+    def load_excel(cls, file_path: str):
+        """
+        Loads a single dataclass instance from an Excel file.
+        Returns HyperParameter: An instance of the dataclass with values from the Excel file.
+        """
+        # Read the Excel file into a DataFrame
+        df_load = pd.read_excel(file_path)
+        # Ensure the file contains at least one row
+        if df_load.empty:
+            raise ValueError(f"The file {file_path} is empty.")
+        # Convert the first row of the DataFrame into a dictionary
+        data_dict = df_load.iloc[0].to_dict()
+        # Pass the dictionary as keyword arguments to the dataclass constructor
+        return cls(**data_dict)
+    
+    def save_excel(self, file_path: str):
+        """
+        Saves the dataclass instance to an Excel file.
+        """
+        # Convert the dataclass to a dictionary
+        data = self.__dict__
+        # Convert the dictionary into a pandas DataFrame
+        df_save = pd.DataFrame([data])  # Wrap in a list to create a single-row DataFrame
+        # Save the DataFrame to Excel
+        df_save.to_excel(file_path, index=False)
 
 @dataclass
 class RunResult:
@@ -69,6 +100,10 @@ class RunResult:
     max_acc: float
     last_loss: float
     last_acc: float
+    min_val_loss: float
+    max_val_acc: float
+    last_val_loss: float
+    last_val_acc: float
     var_loss: float
     var_acc: float
 
@@ -95,6 +130,38 @@ class TqdmEpochProgress(tf.keras.callbacks.Callback):
         """ close out at end of training run
         """
         self.progress_bar.close()
+
+#################################################### UTILITY FUNCTIONS ##############################
+def dataset_to_numpy(dataset):
+    """ change from loaded dataset to numpy arrays
+        Used to change BreastMNIST dataset for SVM analysis
+        In this way we only need one data loader for all analysis types
+    """
+    ## set up the interim structures to allow concatenation across batches
+    x_list = []
+    y_list = []
+    ## loop through dataset
+    for batch in dataset:
+        ## Unpack the batch into features (x) and labels (y)
+        x_batch, y_batch = batch
+        ## Append the batches to the lists
+        x_list.append(x_batch.numpy())
+        y_list.append(y_batch.numpy())
+    ## Concatenate all batches into single NumPy arrays, one for x and one for y
+    x = np.concatenate(x_list, axis=0)
+    y = np.concatenate(y_list, axis=0)
+    return x, y #x and y as numpy arrays
+
+def get_timestamp():
+    """ Gets timestamp. NB specifically compatible with inclusion in filenames
+    """
+    ## get current datetime
+    now = datetime.datetime.now()
+    ## reformat it into a timestamp with year, month, day and time in hours, minutes and seconds
+    ## seconds added to avoid overwriting for short hyperparameter selection runs
+    return now.strftime("%Y_%m_%d_at_%H%M%S") #timestamp
+
+#################################################### DATA LOADING ##############################
 
 def medMNIST_load(data_name,batch_size,shuffle="N"):
     """ reads in data_name and batch_size and returns set of tensor flow datasets
@@ -149,35 +216,7 @@ def medMNIST_load(data_name,batch_size,shuffle="N"):
         result_set    = [train_dataset,test_dataset,val_dataset]
     return result_set # set of results
 
-def dataset_to_numpy(dataset):
-    """ change from loaded dataset to numpy arrays
-        Used to change BreastMNIST dataset for SVM analysis
-        In this way we only need one data loader for all analysis types
-    """
-    ## set up the interim structures to allow concatenation across batches
-    x_list = []
-    y_list = []
-    ## loop through dataset
-    for batch in dataset:
-        ## Unpack the batch into features (x) and labels (y)
-        x_batch, y_batch = batch
-        ## Append the batches to the lists
-        x_list.append(x_batch.numpy())
-        y_list.append(y_batch.numpy())
-    ## Concatenate all batches into single NumPy arrays, one for x and one for y
-    x = np.concatenate(x_list, axis=0)
-    y = np.concatenate(y_list, axis=0)
-    return x, y #x and y as numpy arrays
-
-def get_timestamp():
-    """ Gets timestamp. NB specifically compatible with inclusion in filenames
-    """
-    ## get current datetime
-    now = datetime.datetime.now()
-    ## reformat it into a timestamp with year, month, day and time in hours, minutes and seconds
-    ## seconds added to avoid overwriting for short hyperparameter selection runs
-    return now.strftime("%Y_%m_%d_at_%H%M%S") #timestamp
-
+########################################### GRAPHING, SAVING and ANALYSIS ##############################
 def graph_and_save(history,summary,parameter,filebase,skip=0):
     """ this version calls the two functions together
        summarize history for accuracy
@@ -190,12 +229,12 @@ def graph_and_save(history,summary,parameter,filebase,skip=0):
     graph(history,summary,parameter,skip)
     ## dump history metrics to excel and model and hyper parameters summary
     ## to text file both with same timestamp in names
-    history_summary = history_to_excel(history,
-                                       str(summary),
-                                       parameter,
-                                       filebase)
-    print("Files saved:",history_summary[0],history_summary[1])
-    return history_summary
+    run_summary = history_to_excel(history,
+                                   str(summary),
+                                   parameter,
+                                   filebase)
+    print("Files saved:",run_summary[0],run_summary[1])
+    return run_summary # [filename_h,filename_s,run_result,parameter] 
 
 def graph(history,summary,parameter,skip=0):
     """summarize history for accuracy
@@ -245,6 +284,7 @@ def graph(history,summary,parameter,skip=0):
         plt.legend(['train'], loc='upper right')
     plt.show()
     print("for model\n",str(summary))
+    # no return
 
 def history_to_excel(history,summary,parameter,filebase):
     """ puts history metrics into unique excel file
@@ -252,7 +292,6 @@ def history_to_excel(history,summary,parameter,filebase):
         further version could take all of the paramter entries and autoadd to file
     """
     keys = list(history.history.keys())
-    print("history_to excel keys",keys)
     ## check to see whether val_ variants are provided
     column_order = []
     column_order.append('epoch')
@@ -262,8 +301,9 @@ def history_to_excel(history,summary,parameter,filebase):
     metrics_df = pd.DataFrame(history.history)
     ## add an epoch column to the dataframe for ease of access
     metrics_df['epoch'] = metrics_df.index + 1
+    ## then organise the rest of the dataframe ready for saving
     metrics_df = metrics_df[column_order]
-    ## write dataframe to filename formed by appending timestr to filenamebase
+    ## write dataframe to filename formed by appending timestr to filebase
     timestr    = get_timestamp()
     filename_h = filebase+'metrics_'+timestr+'.xlsx'
     metrics_df.to_excel(filename_h,index=False)
@@ -272,60 +312,55 @@ def history_to_excel(history,summary,parameter,filebase):
     ## write the parameter text to the file
     with open(filename_s, "w") as file:
         file.write(parameter.list_parameters()+summary)
+    ## now construct the run result structure with calculated metrics
     run_result = RunResult(min_loss      = metrics_df[column_order[1]].min(),
                            max_acc       = metrics_df[column_order[2]].max(),
                            last_loss     = metrics_df[column_order[1]].iloc[-1],
                            last_acc      = metrics_df[column_order[2]].iloc[-1],
-                           ##max_val_loss  = metrics_df[column_order[3]].min(),
-                           ##max_val_acc   = metrics_df[column_order[4]].max(),
-                           ##last_val_loss = metrics_df[column_order[3]].iloc[-1],
-                           ##last_val_acc  = metrics_df[column_order[4]].iloc[-1],
+                           min_val_loss  = metrics_df[column_order[3]].min(),
+                           max_val_acc   = metrics_df[column_order[4]].max(),
+                           last_val_loss = metrics_df[column_order[3]].iloc[-1],
+                           last_val_acc  = metrics_df[column_order[4]].iloc[-1],
                            var_loss      = metrics_df[column_order[1]].var(),
                            var_acc       = metrics_df[column_order[2]].var())
     ## added parameter to return results
     return [filename_h,filename_s,run_result,parameter] #filenames
 
 def hyper_process(history,_,parameter):
-    """ expanded list of parameters that are handled
-        further version could take all of the paramter entries and autoadd to file
+    """ flexibly reads history and writes to dataframe to simplify analysis
+        packages a return structure of runresult dataframe and paramter set
+        expanded list of parameters that are handled
     """
     keys = list(history.history.keys())
-    print(keys)
-    ## check to see whether val_ variants are provided
+    ## organise the dataframe columns
     column_order = []
     column_order.append('epoch')
     for item in keys:
         column_order.append(item)
-    ##column_order.append('val_loss')
-    ##column_order.append('val_acc')    
     ## convert history which is dictionary structure to a DataFrame
     metrics_df = pd.DataFrame(history.history)
     ## add an epoch column to the dataframe for ease of access
     metrics_df['epoch'] = metrics_df.index + 1
+    ## organise the dataframe columns
     metrics_df = metrics_df[column_order]
-    ## do I need write dataframe to filename
-    ##timestr    = get_timestamp()
-    ##filename_h = filebase+'metrics_df_'+timestr+'.xlsx'
-    ## metrics_df.to_excel(filename_h,index=False)
     run_result = RunResult(min_loss      = metrics_df[column_order[1]].min(),
                            max_acc       = metrics_df[column_order[2]].max(),
                            last_loss     = metrics_df[column_order[1]].iloc[-1],
                            last_acc      = metrics_df[column_order[2]].iloc[-1],
-                           ##max_val_loss  = metrics_df[column_order[3]].min(),
-                           ##max_val_acc   = metrics_df[column_order[4]].max(),
-                           ##last_val_loss = metrics_df[column_order[3]].iloc[-1],
-                           ##last_val_acc  = metrics_df[column_order[4]].iloc[-1],
+                           min_val_loss  = 99999,
+                           max_val_acc   = 0,
+                           last_val_loss = 99999,
+                           last_val_acc  = 0,
                            var_loss      = metrics_df[column_order[1]].var(),
                            var_acc       = metrics_df[column_order[2]].var())
     ## added parameter to return results
     hyper_history = ["","",run_result,parameter]
-    return hyper_history
+    return hyper_history ## ["","",run_result,parameter] to mirror history_to_excel returns
 
 def analyse_run(run_list,selection,filebase):
     """ take run results and analyse
         added filebase param to allow saving of data to file 27122024
     """
-    print("extracting")
     # Extract data into a flat structure
     flat_data = []
     for entry in run_list:
@@ -339,11 +374,15 @@ def analyse_run(run_list,selection,filebase):
             'max_acc': result.max_acc,
             'last_loss': result.last_loss,
             'last_acc': result.last_acc,
+            'min_val_loss': result.min_val_loss,
+            'max_val_acc': result.max_val_acc,
+            'last_val_loss': result.last_val_loss,
+            'last_val_acc': result.last_val_acc,
             'var_loss': result.var_loss,
             'var_acc': result.var_acc,
             # HyperParameters attributes
             'learning_rate': parameter.learning_rate,
-            'batch_size': parameter.batch_size,
+            'kernel_size': parameter.kernel_size,
             'num_epochs': parameter.num_epochs,
             'num_filter': parameter.num_filter,
             'strides': parameter.strides,
@@ -364,7 +403,6 @@ def analyse_run(run_list,selection,filebase):
     min_loss_run = run_df.loc[run_df['min_loss'].idxmin()]
     ## Select the run with the largest max_acc
     max_acc_run = run_df.loc[run_df['max_acc'].idxmax()]
-
     ## Select the runs that satisfies the selected criteria
     best_run = run_df.loc[(run_df['min_loss'] == run_df['min_loss'].min()) &
                     (run_df['max_acc'] == run_df['max_acc'].max())]
@@ -374,20 +412,24 @@ def analyse_run(run_list,selection,filebase):
         print(min_loss_run)
         print("\nRun with the largest max_acc:")
         print(max_acc_run)
-    ## Select the runs that satisfies the selected criteria
-    best_run2 = run_df.loc[(run_df['min_loss'] == run_df['min_loss'].min()) &
-                    (run_df['max_acc'] == run_df['max_acc'].max()) &
+    ## Select the runs that satisfy further selected criteria
+    ## second best run is the one that maximises validation accuracy and
+    ## where maximum accuracy is greater or equal to last accuracy, so plateau or increasing
+    best_run2 = run_df.loc[(run_df['max_acc'] == run_df['max_acc'].max()) &
                     (run_df['max_acc'] >= run_df['last_acc'])]
-
-    return best_run,run_df,best_run2
+    ## third best run is the one that mimimises validation loss and
+    ## where maximum accuracy is less than or equal to last loss, so plateau or falling
+    best_run3 = run_df.loc[(run_df['min_loss'] == run_df['min_loss'].min()) &
+                    (run_df['min_loss'] <= run_df['last_loss'])]
+    return run_df,best_run,best_run2,best_run3
 
 def analyse_hyperparameters(run_df):
-    """ analyse hyperparameters
+    """ analyse hyperparameters using several techniques to gauge their impact
     """
     ## Prepare the input analysis data with hyperparameters as features
     ## doesnt support loss or optimise as they are not numeric values (yet)
     X = run_df[['learning_rate', 'num_epochs', 'num_filter','strides','layers',\
-                'dropout_rate','batch_size']]  # Hyperparameters
+                'dropout_rate','kernel_size']]  # Hyperparameters
     y = run_df['max_acc']  ## Metric to predict should this be accuracy or loss?
     ## Train-test split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -408,5 +450,4 @@ def analyse_hyperparameters(run_df):
         'Hyperparameter': X.columns,
         'Importance': rf_model.feature_importances_
     }).sort_values(by='Importance', ascending=False)
-
     return feature_importance,coef
