@@ -17,6 +17,7 @@
 ## 20122024 Extended parameter again
 ## 27122024 Comments and modifications for Task B1 CNN Tune
 ## 31122024 Extended dataclasses and enhanced hyper analysis in combination with model scripts
+## 11012025 Added compare graph function and overfitting callback rather than previous manual option
 
 #################################################### LIBRARY IMPORTS ##############################
 ## standard python libraries
@@ -57,7 +58,7 @@ class HyperParameters:
     def list_parameters(self):
         """ lists all attributes and values in HyperParameters class
         """
-        result = ""
+        result = ""   ## initalise result
         # Loop through attributes and get their values
         for field in fields(HyperParameters):
             attribute_name = field.name
@@ -107,6 +108,17 @@ class RunResult:
     var_loss: float
     var_acc: float
 
+    def list_runresult(self):
+        """ lists all attributes and values in RunResult class
+        """
+        result = ""   ## initalise result
+        # Loop through attributes and get their values
+        for field in fields(RunResult):
+            attribute_name = field.name
+            value = getattr(self, attribute_name)
+            result= result+(f"{attribute_name}: {value}"+"\n")
+        return result
+
 class TqdmEpochProgress(tf.keras.callbacks.Callback):
     """ simple progress bar
     """
@@ -131,6 +143,34 @@ class TqdmEpochProgress(tf.keras.callbacks.Callback):
         """
         self.progress_bar.close()
 
+class StopOverfittingCallback(tf.keras.callbacks.Callback):
+    def __init__(self, patience=3, threshold=0.1):
+        """
+        Args:
+            patience (int): Number of epochs to allow overfitting before stopping.
+            threshold (float): Maximum allowed difference between training and validation loss.
+        """
+        super(StopOverfittingCallback, self).__init__()
+        ## initialise
+        self.patience          = patience       ## Number of epochs overfitting
+        self.threshold         = threshold      ## What is a material overfit threshold
+        self.overfitting_count = 0              ## Count epochs with overfitting
+
+    def on_epoch_end(self, epoch, logs=None):
+        train_loss = logs.get('loss')
+        val_loss = logs.get('val_loss')
+        ## Check if validation loss is significantly higher than training loss
+        if val_loss is not None and train_loss is not None:
+            gap = val_loss - train_loss
+            if gap > self.threshold:
+                self.overfitting_count += 1
+                print(f"Overfitting detected at epoch {epoch+1}: Loss Gap = {gap:.4f}")
+            else:
+                self.overfitting_count = 0  # Reset if no overfitting in this epoch        
+            ## Stop training if material overfitting persists for 'patience' epochs
+            if self.overfitting_count >= self.patience:
+                print("Stopping training due to persistent overfitting.")
+                self.model.stop_training = True
 #################################################### UTILITY FUNCTIONS ##############################
 def dataset_to_numpy(dataset):
     """ change from loaded dataset to numpy arrays
@@ -284,7 +324,55 @@ def graph(history,summary,parameter,skip=0):
         plt.legend(['train'], loc='upper right')
     plt.show()
     print("for model\n",str(summary))
-    # no return
+    ## no return
+
+def graph_compare(file1,file2,type_flag='accuracy',index_limit=-1,skip=-1):
+    """ allows display of two model runs from metrics files on a single plot
+        the flag type controls which metrics to display
+        the index_limit and skip can be used to restrict the range displayed
+        they default to displaying accuracy for the full range
+    """
+    if type_flag in ['accuracy','loss']:
+        ## read in the data
+        data1 = pd.read_excel(file1)
+        data2 = pd.read_excel(file2)
+        ## Both datasets have the same columns
+        columns = [item for item in data1.columns if item != 'epoch']
+        if type_flag == 'accuracy':
+            columns.remove('loss')
+            columns.remove('val_loss')
+        else:
+            columns.remove('acc')
+            columns.remove('val_acc')
+        ## slice both dataframes to include only rows up to the chosen range
+        if index_limit > 0:
+            if len(data1) > index_limit:
+                data1 = data1.iloc[:index_limit]
+                data2 = data2.iloc[:index_limit]
+        if skip > 0:
+                if len(data1) > skip:
+                    data1 = data1.iloc[skip:]
+                    data2 = data2.iloc[skip:]
+        ## define line styles for Model 1 (blue) and Model 2 (green)
+        line_styles_model1 = ['solid', 'dashed']  # Model 1 styles
+        line_styles_model2 = ['solid', 'dashed']  # Model 2 styles can be different
+        ## create the plot
+        plt.figure(figsize=(12, 8))
+        ## plot comparisons for all chosen variables
+        for i,col in enumerate(columns):
+            plt.plot(data1[col], label=f'Model 1 '+col, color='blue', \
+                    linestyle=line_styles_model1[i % len(line_styles_model1)])
+            plt.plot(data2[col], label=f'Model 2 '+col, color='green', \
+                    linestyle=line_styles_model2[i % len(line_styles_model2)])
+        plt.title(f'Comparison of {type_flag}')
+        plt.xlabel('Epoch')
+        plt.ylabel(type_flag)
+        plt.legend()
+        plt.grid()
+        plt.show()
+    else:
+        print('Graph metric not recognised')
+    ## no return
 
 def history_to_excel(history,summary,parameter,filebase):
     """ puts history metrics into unique excel file
@@ -343,16 +431,31 @@ def hyper_process(history,_,parameter):
     metrics_df['epoch'] = metrics_df.index + 1
     ## organise the dataframe columns
     metrics_df = metrics_df[column_order]
-    run_result = RunResult(min_loss      = metrics_df[column_order[1]].min(),
-                           max_acc       = metrics_df[column_order[2]].max(),
-                           last_loss     = metrics_df[column_order[1]].iloc[-1],
-                           last_acc      = metrics_df[column_order[2]].iloc[-1],
-                           min_val_loss  = 99999,
-                           max_val_acc   = 0,
-                           last_val_loss = 99999,
-                           last_val_acc  = 0,
-                           var_loss      = metrics_df[column_order[1]].var(),
-                           var_acc       = metrics_df[column_order[2]].var())
+    ## now construct the run result structure with calculated metric
+    if len(column_order) > 2:
+        ## val values can be calculated
+        run_result = RunResult(min_loss      = metrics_df[column_order[1]].min(),
+                               max_acc       = metrics_df[column_order[2]].max(),
+                               last_loss     = metrics_df[column_order[1]].iloc[-1],
+                               last_acc      = metrics_df[column_order[2]].iloc[-1],
+                               min_val_loss  = metrics_df[column_order[3]].min(),
+                               max_val_acc   = metrics_df[column_order[4]].max(),
+                               last_val_loss = metrics_df[column_order[3]].iloc[-1],
+                               last_val_acc  = metrics_df[column_order[4]].iloc[-1],
+                               var_loss      = metrics_df[column_order[1]].var(),
+                               var_acc       = metrics_df[column_order[2]].var())
+    else:
+        ## set val values to default
+        run_result = RunResult(min_loss      = metrics_df[column_order[1]].min(),
+                               max_acc       = metrics_df[column_order[2]].max(),
+                               last_loss     = metrics_df[column_order[1]].iloc[-1],
+                               last_acc      = metrics_df[column_order[2]].iloc[-1],
+                               min_val_loss  = 99999,
+                               max_val_acc   = 0,
+                               last_val_loss = 99999,
+                               last_val_acc  = 0,
+                               var_loss      = metrics_df[column_order[1]].var(),
+                               var_acc       = metrics_df[column_order[2]].var())
     ## added parameter to return results
     hyper_history = ["","",run_result,parameter]
     return hyper_history ## ["","",run_result,parameter] to mirror history_to_excel returns
@@ -451,3 +554,24 @@ def analyse_hyperparameters(run_df):
         'Importance': rf_model.feature_importances_
     }).sort_values(by='Importance', ascending=False)
     return feature_importance,coef
+
+def process_best_run(best_run):
+    """ process best_run
+    """
+    ##print(best_run)
+    hp_fields = [f.name for f in fields(HyperParameters)]
+    for instance in best_run:
+        if instance in hp_fields:
+            print(instance,":",best_run[instance].iloc[0])
+    ##should be able t do this costruction of parameter more flexibly
+    parameter = HyperParameters(learning_rate=best_run['learning_rate'].iloc[0], 
+                                kernel_size=best_run['kernel_size'].iloc[0], 
+                                num_epochs=best_run['num_epochs'].iloc[0], 
+                                num_filter=best_run['num_filter'].iloc[0],
+                                layers=best_run['layers'].iloc[0],
+                                dropout_rate=best_run['dropout_rate'].iloc[0],
+                                strides=best_run['strides'].iloc[0],
+                                padding=best_run['padding'].iloc[0],
+                                optimise=best_run['optimise'].iloc[0],
+                                loss=best_run['loss'].iloc[0]) 
+    parameter.save_excel("param_"+str(get_timestamp())+".xlsx")
