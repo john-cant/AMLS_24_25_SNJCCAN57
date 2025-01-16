@@ -1,7 +1,7 @@
-# **Project Title and Description:**
+# **AMLS Assessment:Project Title and Description**
 This project is the implementation, analysis and results for two supervised machine learning categorization problems, Tasks A and B, as required by the AMLS ELEC0134 24/25 Assignment. 
--	Task A is a binary classification task using BreastMNIST [9] publicly available data set with the objective of correctly classifying images into Benign and Malignant.
--	Task B is a multi-classification task using Blood-MNIST [9] data set with the objective of classify-ing images into one of eight different blood types.
+-	Task A is a binary classification task using BreastMNIST publicly available data set with the objective of correctly classifying images into Benign and Malignant.
+-	Task B is a multi-classification task using BloodMNIST data set with the objective of classify-ing images into one of eight different blood types.
 The key scripts to run the various hyperparameter selections, training and testing were implemented in Jupyter notebooks running on a specific Anaconda configured environment. These reference both external and locally developed Python library - AMLS_common.py – the later to reduce the need for duplicated code and to improve the relevance, efficiency and readability of the scripts.
 
 ## **Installation Instructions:**
