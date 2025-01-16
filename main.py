@@ -27,14 +27,27 @@ def run_notebook(notebook_path, output_path=None, timeout=36000):
         ## catch errors
         print(f"Failed to execute {notebook_path}: {e}")
 
+def folder_safe(directory_path):
+    """ Check if the directory exists
+        and if not then create it
+    """
+    if not os.path.exists(directory_path):
+        # Create the directory
+        os.makedirs(directory_path)
+        print(f"Directory '{directory_path}' created.")
+    else:
+        print(f"Directory '{directory_path}' already exists.")
+
 def main():
     """ main script execution
     """
     ## Define the paths to the specific notebooks
     ## Should be set to A and B for official running
     ## Can be changed for development test
-    path_a = "A_DEV"
-    path_b = "B_DEV"
+    path_a = "A"
+    path_b = "B"
+    folder_safe(path_a+"/metrics")
+    folder_safe(path_b+"/metrics")
     notebook_a_svm_path = path_a+"/TASK_A_1_SVM_Base.ipynb"
     notebook_a_cnn_path = path_a+"/TASK_A_4_CNN_Tune.ipynb"
     notebook_b_cnn_path = path_b+"/TASK_B_3_CNN_Tune.ipynb"
