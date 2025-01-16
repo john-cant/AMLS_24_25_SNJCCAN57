@@ -8,7 +8,7 @@ The key scripts to run the various hyperparameter selections, training and testi
 This project is intended to be easy to run and need the minimum of installation. The files can be run from a copy of the GitHub structure.
 All the Python packages required are listed in the Packages Required section below. There is a single main.py file that will run the main scripts.
 In addition a copy of a local code library, - developed for these specific tasks and includes all references to MedMNIST specific library - called AMLS_common.py needs to be included in each of the folders A & B.
-Each folder A and B should have a metrics folder which will be used to store results files of various types.
+Each folder A and B should have a metrics folder which will be used to store results files of various types. If this does not exist then main will create it.
 
 
 ## **Usage Examples:**
