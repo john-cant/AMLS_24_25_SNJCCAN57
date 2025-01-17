@@ -26,6 +26,17 @@ There are seven main scripts/Jupyter notebooks:
 - Task_B_2_CNN_Hyper: supports the HyperParameter set selection for the Task B CNN using the Training and Validation datasets
 - Task_B_3_CNN_Tune: takes the optimised HyperParameters and runs the model against the Test Dataset, outputting results
 
+## **Files Output**
+The scripts will output a number of files to store results and allow easy passing of parameters between scripts. These are:
+
+### Hyper Outputs
+- Run file summary of all the results and values for the hyperparameter sets generated and trained in Hyper
+- Parameter file containing the _best case_ hyperparameter set in format thta can be read in by Tune
+
+### Tune Outputs (both have same timestamp)
+- Metrics spreadsheet containing an epoch by epoch list of outputs from history
+- Summary text file containing the CNN model summary
+
 ## **Packages Required:**
 - io
 - os
